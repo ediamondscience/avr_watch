@@ -13,12 +13,7 @@
 #include <stdint.h>
 #include <string.h>
 
-class I2C {
-public:
-    // Provide your project's I2C write method here.
-    // Return true on success, false on failure.
-    bool write(uint8_t address, const uint8_t *data, size_t length);
-};
+#include "i2c.h"
 
 class GME12864_OLED {
 public:
@@ -26,8 +21,8 @@ public:
     static constexpr uint8_t HEIGHT = 64;
     static constexpr uint16_t BUFFER_SIZE = (WIDTH * HEIGHT) / 8;
 
-    GME12864_OLED(I2C &i2c, uint8_t address = 0x3C)
-        : i2c_(i2c), address_(address) {
+    GME12864_OLED(uint8_t address = 0x3C)
+        : address_(address) {
         clear();
     }
 
@@ -86,14 +81,14 @@ public:
                 0x00, // Set lower column start address
                 0x10  // Set higher column start address
             };
-            if (!i2c_.write(address_, header, sizeof(header))) return false;
+            if (!I2C::write(address_, header, sizeof(header))) return false;
 
             // Prepare a local buffer: first byte control (0x40 = data), then 128 bytes of data
             uint8_t sendBuf[1 + WIDTH];
             sendBuf[0] = 0x40; // data control byte
             memcpy(&sendBuf[1], &buffer_[page * WIDTH], WIDTH);
 
-            if (!i2c_.write(address_, sendBuf, sizeof(sendBuf))) return false;
+            if (!I2C::write(address_, sendBuf, sizeof(sendBuf))) return false;
         }
         return true;
     }
@@ -109,13 +104,12 @@ public:
     }
 
 private:
-    I2C &i2c_;
     uint8_t address_;
     uint8_t buffer_[BUFFER_SIZE];
 
     bool sendCommand(uint8_t cmd) {
         uint8_t data[2] = { 0x00, cmd }; // 0x00 = control byte for command
-        return i2c_.write(address_, data, 2);
+        return I2C::write(address_, data, 2);
     }
 
     bool sendCommandBlock(const uint8_t *cmds, size_t len) {
