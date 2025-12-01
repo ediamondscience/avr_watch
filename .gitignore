@@ -39,3 +39,9 @@
 
 # debug information files
 *.dwo
+
+# platformio generated files
+.pio
+
+# vscode config files
+.vscode
