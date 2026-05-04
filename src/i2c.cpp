@@ -18,6 +18,122 @@
 
 #include "i2c.h"
 
+// Low-level helpers
+inline void I2C::sda_low() {
+    DDRB |= (1 << SDA_b); // Set SDA as output
+    PORTB &= ~(1 << SDA_b); // Drive SDA low
+}
+
+inline void I2C::sda_release() {
+    DDRB &= ~(1 << SDA_b); // Set SDA as input
+    PORTB |= (1 << SDA_b);  // Enable pull-up
+}
+
+inline uint8_t I2C::sda_read() {
+    return (PINB & (1 << SDA_b)) ? 1 : 0;
+}
+
+inline void I2C::scl_low() {
+    DDRB |= (1 << SCL_b); // Set SCL as output
+    PORTB &= ~(1 << SCL_b); // Drive SCL low
+}
+
+inline void I2C::scl_release() {
+    DDRB &= ~(1 << SCL_b); // Set SCL as input
+    PORTB |= (1 << SCL_b);  // Enable pull-up
+}
+
+inline void I2C::i2c_delay() {
+    _delay_us(5); // ~100kHz with 1MHz clock, adjust as needed
+}
+
+
+// Public API
+
+void I2C::begin() {
+    // Set pins to input with pull-ups enabled initially.
+    sda_release();
+    scl_release();
+}
+
+bool I2C::write(uint8_t addr7, const uint8_t *data, uint8_t len) {
+    start_condition();
+
+    if (!write_byte(addr7 << 1)) { // Address with write bit
+        stop_condition();
+        return false;
+    }
+
+    for (uint8_t i = 0; i < len; ++i) {
+        if (!write_byte(data[i])) {
+            stop_condition();
+            return false;
+        }
+    }
+
+    stop_condition();
+    return true;
+}
+
+bool I2C::read(uint8_t addr7, uint8_t *buf, uint8_t len) {
+    start_condition();
+
+    if (!write_byte((addr7 << 1) | 1)) { // Address with read bit
+        stop_condition();
+        return false;
+    }
+
+    for (uint8_t i = 0; i < len; ++i) {
+        bool is_last_byte = (i == (len - 1));
+        buf[i] = read_byte(!is_last_byte); // NACK on last byte
+    }
+
+    stop_condition();
+    return true;
+}
+
+bool I2C::writeRegister(uint8_t addr7, uint8_t reg, uint8_t val) {
+    start_condition();
+    if (!write_byte(addr7 << 1)) { // address + write
+        stop_condition();
+        return false;
+    }
+    if (!write_byte(reg)) { // register
+        stop_condition();
+        return false;
+    }
+    if (!write_byte(val)) { // value
+        stop_condition();
+        return false;
+    }
+    stop_condition();
+    return true;
+}
+
+bool I2C::readRegister(uint8_t addr7, uint8_t reg, uint8_t &val) {
+    // Write register address
+    start_condition();
+    if (!write_byte(addr7 << 1)) { // address + write
+        stop_condition();
+        return false;
+    }
+    if (!write_byte(reg)) { // register
+        stop_condition();
+        return false;
+    }
+
+    // Read value
+    start_condition(); // repeated start
+    if (!write_byte((addr7 << 1) | 1)) { // address + read
+        stop_condition();
+        return false;
+    }
+    val = read_byte(false); // read one byte, send NACK
+    stop_condition();
+    return true;
+}
+
+
 // Private
 
 void I2C::start_condition() {
@@ -49,12 +165,14 @@ bool I2C::write_byte(uint8_t b) {
         scl_low();
         i2c_delay();
     }
-    // ACK bit
-    sda_release(); // release SDA for ACK
-    i2c_delay();
-    scl_release();
+    // ACK bit — give SDA extra time to charge to VIH through the pull-up before
+    // raising SCL. One i2c_delay (~5µs) is not enough with weak/internal pull-ups
+    // since the line may have just been driven low for the last data bit.
+    sda_release();
     i2c_delay();
     bool ack = (sda_read() == 0);
+    scl_release();
+    i2c_delay();
     scl_low();
     i2c_delay();
     return ack;
@@ -62,9 +180,9 @@ bool I2C::write_byte(uint8_t b) {
 
 uint8_t I2C::read_byte(bool ack) {
     uint8_t b = 0;
+    sda_release(); // Make sure SDA is input
     for (uint8_t i = 0; i < 8; ++i) {
         b <<= 1;
-        sda_release();
         i2c_delay();
         scl_release();
         i2c_delay();

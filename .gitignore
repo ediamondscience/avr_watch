@@ -45,3 +45,6 @@
 
 # vscode config files
 .vscode
+
+# dump folder
+.claude
