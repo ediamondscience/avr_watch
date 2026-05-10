@@ -11,6 +11,7 @@ public:
     static bool read(uint8_t addr7, uint8_t *buf, uint8_t len);
     static bool writeRegister(uint8_t addr7, uint8_t reg, uint8_t val);
     static bool readRegister(uint8_t addr7, uint8_t reg, uint8_t &val);
+    static uint8_t sda_read();
 
 private:
     // Pin definitions for ATtiny85
@@ -20,7 +21,6 @@ private:
     // Low-level helpers
     static inline void sda_low();
     static inline void sda_release();
-    static inline uint8_t sda_read();
 
     static inline void scl_low();
     static inline void scl_release();

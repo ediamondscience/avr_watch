@@ -26,10 +26,10 @@ inline void I2C::sda_low() {
 
 inline void I2C::sda_release() {
     DDRB &= ~(1 << SDA_b); // Set SDA as input
-    PORTB |= (1 << SDA_b);  // Enable pull-up
+    PORTB |= (1 << SDA_b); // internal pull-up
 }
 
-inline uint8_t I2C::sda_read() {
+uint8_t I2C::sda_read() {
     return (PINB & (1 << SDA_b)) ? 1 : 0;
 }
 
@@ -40,18 +40,23 @@ inline void I2C::scl_low() {
 
 inline void I2C::scl_release() {
     DDRB &= ~(1 << SCL_b); // Set SCL as input
-    PORTB |= (1 << SCL_b);  // Enable pull-up
+    PORTB |= (1 << SCL_b); // internal pull-up
 }
 
 inline void I2C::i2c_delay() {
-    _delay_us(5); // ~100kHz with 1MHz clock, adjust as needed
+    _delay_us(3); // ~100kHz with 1MHz clock, adjust as needed
 }
 
 
 // Public API
 
 void I2C::begin() {
-    // Set pins to input with pull-ups enabled initially.
+    // Turn off the USI port
+    USICR = 0;
+    // Re-enable digital input buffers for SDA (PB0/AIN0) and SCL (PB2/ADC1).
+    // The Arduino framework may set DIDR0 bits to reduce ADC noise; if AIN0D or
+    // ADC1D are set, PINB reads for those pins always return 0, breaking I2C.
+    //DIDR0 &= ~((1 << AIN0D) | (1 << ADC1D));
     sda_release();
     scl_release();
 }
@@ -150,7 +155,8 @@ void I2C::stop_condition() {
     sda_low();
     i2c_delay();
     scl_release();
-    i2c_delay();
+    while (!(PINB & (1 << SCL_b))) {}  // clock-stretch: wait for SCL to go HIGH
+    i2c_delay();  // extra hold: SDA needs ~3.5V (ATtiny VIH), not just ~2V (LA threshold)
     sda_release();
     i2c_delay();
 }
@@ -159,20 +165,19 @@ bool I2C::write_byte(uint8_t b) {
     for (uint8_t i = 0; i < 8; ++i) {
         if (b & 0x80) sda_release(); else sda_low();
         b <<= 1;
-        i2c_delay();
         scl_release();
         i2c_delay();
         scl_low();
         i2c_delay();
     }
-    // ACK bit — give SDA extra time to charge to VIH through the pull-up before
-    // raising SCL. One i2c_delay (~5µs) is not enough with weak/internal pull-ups
-    // since the line may have just been driven low for the last data bit.
+    // ACK/NACK: release SDA so device can drive it, then wait for SCL to
+    // actually read HIGH (handles slow pull-up rise time) before sampling.
     sda_release();
     i2c_delay();
-    bool ack = (sda_read() == 0);
     scl_release();
-    i2c_delay();
+    while (!(PINB & (1 << SCL_b))) {}  // clock-stretch: wait for SCL to go HIGH
+    i2c_delay();  // extra hold: SDA needs ~3.5V (ATtiny VIH), not just ~2V (LA threshold)
+    bool ack = (sda_read() == 0);
     scl_low();
     i2c_delay();
     return ack;
@@ -183,7 +188,6 @@ uint8_t I2C::read_byte(bool ack) {
     sda_release(); // Make sure SDA is input
     for (uint8_t i = 0; i < 8; ++i) {
         b <<= 1;
-        i2c_delay();
         scl_release();
         i2c_delay();
         if (sda_read()) b |= 1;
